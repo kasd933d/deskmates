@@ -1,0 +1,8 @@
+vendor
+.env
+storage/*.key
+storage/framework/*
+!storage/framework/.gitignore
+database/*.sqlite
+.phpunit.result.cache
+.phpunit.cache

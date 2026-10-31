@@ -1,0 +1,88 @@
+name: deskmates
+
+x-api-base: &api-base
+  build:
+    context: .
+    dockerfile: docker/php/Dockerfile
+  env_file:
+    - apps/api/.env
+  volumes:
+    - ./apps/api:/var/www/html
+    - api-vendor:/var/www/html/vendor
+  environment: &api-env
+    APP_URL: http://localhost:8000
+    FRONTEND_URL: http://localhost:3000
+    DB_HOST: mysql
+    DB_PORT: 3306
+    DB_DATABASE: deskmates
+    DB_USERNAME: deskmates
+    DB_PASSWORD: secret
+    BROADCAST_CONNECTION: reverb
+    REVERB_HOST: reverb
+    REVERB_PORT: 8080
+    REVERB_SCHEME: http
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: deskmates
+      MYSQL_USER: deskmates
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    <<: *api-base
+    command: sh -c "php artisan migrate --graceful && php artisan serve --host=0.0.0.0 --port=8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  reverb:
+    <<: *api-base
+    command: php artisan reverb:start --host=0.0.0.0 --port=8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  worker:
+    <<: *api-base
+    command: php artisan queue:work --queue=default,phase,push
+    depends_on:
+      mysql:
+        condition: service_healthy
+      reverb:
+        condition: service_started
+
+  scheduler:
+    <<: *api-base
+    command: php artisan schedule:work
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  web:
+    build:
+      context: apps/web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+      - reverb
+
+volumes:
+  mysql-data:
+  api-vendor:

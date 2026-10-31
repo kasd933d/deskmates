@@ -1,0 +1,32 @@
+# Dependencies / builds
+node_modules/
+.next/
+out/
+dist/
+
+# Env — never commit real env files, only examples
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Laravel
+apps/api/vendor/
+apps/api/storage/*.key
+apps/api/storage/framework/cache/*
+apps/api/storage/framework/sessions/*
+apps/api/storage/framework/views/*
+apps/api/storage/framework/testing/*
+apps/api/storage/logs/*
+apps/api/bootstrap/cache/*.php
+apps/api/database/*.sqlite
+apps/api/.phpunit.result.cache
+apps/api/.phpunit.cache/
+
+# OS / editor / agent tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
+*.swp
