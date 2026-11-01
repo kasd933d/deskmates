@@ -156,4 +156,24 @@ class AuthTest extends TestCase
 
         $responses->last()->assertStatus(429);
     }
+
+    public function test_register_and_login_have_independent_rate_limits(): void
+    {
+        // Exhaust the login budget...
+        collect(range(1, 6))
+            ->map(fn () => $this->postJson('/api/v1/auth/login', [
+                'email' => 'nobody@example.com',
+                'password' => 'wrong',
+            ]))
+            ->last()
+            ->assertStatus(429);
+
+        // ...registering must still work: separate buckets per endpoint.
+        $this->postJson('/api/v1/auth/register', [
+            'name' => 'Rate',
+            'email' => 'rate@example.com',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+        ])->assertStatus(201);
+    }
 }

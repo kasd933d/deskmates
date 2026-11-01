@@ -35,6 +35,16 @@ class RoomPolicy
         return $user->isAdmin() || $room->isHost($user);
     }
 
+    public function controlTimer(User $user, Room $room): bool
+    {
+        // Always-on timers are deterministic — nobody controls them.
+        if ($room->isAlwaysOn()) {
+            return false;
+        }
+
+        return $room->isHost($user);
+    }
+
     public function join(User $user, Room $room): bool
     {
         // Private rooms are gated by the invite code, validated in the

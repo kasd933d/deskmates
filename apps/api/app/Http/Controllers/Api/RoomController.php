@@ -7,6 +7,7 @@ use App\Http\Requests\StoreRoomRequest;
 use App\Http\Resources\RoomResource;
 use App\Models\Room;
 use App\Models\RoomMember;
+use App\Services\RoomClockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -86,9 +87,21 @@ class RoomController extends Controller
             return response()->json(['message' => 'This room is private. An invite code is required.'], 403);
         }
 
+        $clock = app(RoomClockService::class);
+        $nowMs = (int) now()->getTimestampMs();
+
+        // Lazy fallback: advance a user room whose phase expired while no
+        // job ran (idempotent, cheap check on every state fetch).
+        $clock->advanceIfExpired($room, $nowMs);
+
+        $timer = $room->isAlwaysOn()
+            ? $clock->alwaysOnPhase($room, $nowMs)
+            : $clock->userRoomState($room->fresh());
+
         return response()->json([
             'room' => (new RoomResource($room))->toArray($request),
-            'server_now_ms' => (int) now()->getTimestampMs(),
+            'timer' => $timer,
+            'server_now_ms' => $nowMs,
         ]);
     }
 
