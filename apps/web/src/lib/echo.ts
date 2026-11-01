@@ -1,13 +1,13 @@
 import Echo from "laravel-echo";
 import Pusher from "pusher-js";
 
-let echoInstance: Echo<"public"> | null = null;
+let echoInstance: Echo<"reverb"> | null = null;
 
 /**
  * Returns the shared Laravel Echo client, configured for Laravel Reverb.
  * Only create this on the client (browser) — never during SSR.
  */
-export function getEcho(): Echo<"public"> {
+export function getEcho(): Echo<"reverb"> {
   if (echoInstance) {
     return echoInstance;
   }
@@ -20,7 +20,7 @@ export function getEcho(): Echo<"public"> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).Pusher = Pusher;
 
-  echoInstance = new Echo<"public">({
+  echoInstance = new Echo<"reverb">({
     broadcaster: "reverb",
     key: appKey,
     wsHost: host,

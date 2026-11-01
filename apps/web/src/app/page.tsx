@@ -50,7 +50,11 @@ export default function Home() {
 
     // Reverb connection state hooks (pusher-js based).
     const pusher = echo.connector.pusher as unknown as {
-      connection: { state: string; bind: (e: string, cb: () => void) => void };
+      connection: {
+        state: string;
+        bind: (e: string, cb: () => void) => void;
+        unbind: (e: string, cb: () => void) => void;
+      };
     };
     const updateState = () => {
       const state = pusher.connection.state;
@@ -67,7 +71,6 @@ export default function Home() {
       pusher.connection.unbind("state_change", updateState);
       echo.leave("ping");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function sendPing(manual: boolean) {

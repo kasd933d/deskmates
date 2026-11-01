@@ -79,7 +79,7 @@ The landing page subscribes to the public `ping` channel through Laravel Echo. E
 | Milestone | Status |
 |---|---|
 | 0 — Setup (monorepo, Docker, Reverb ping) | ✅ |
-| 1 — Auth, profile, lobby | ⬜ |
+| 1 — Auth, profile, lobby | ✅ |
 | 2 — Timer engine | ⬜ |
 | 3 — Presence and membership | ⬜ |
 | 4 — Chat, reactions, moderation | ⬜ |
