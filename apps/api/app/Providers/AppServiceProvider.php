@@ -22,18 +22,30 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Auth endpoints are throttled per route, not per "any auth action".
-        // The default `throttle:5,1` signs its key on (domain|ip) only, so
-        // register, login and logout would share one 5/min bucket: a user
+        // PRD 6 rate limits. Auth endpoints get per-route buckets: Laravel's
+        // default `throttle:5,1` signs its key on (domain|ip) only, so
+        // register, login and logout would share one 5/min bucket — a user
         // who registers and then logs in twice could be locked out, and any
-        // two users behind one NAT certainly would be. Named limiters give
-        // each endpoint its own budget while keeping the same strictness.
+        // two users behind one NAT certainly would be.
         RateLimiter::for('auth-register', function (Request $request) {
             return Limit::perMinute(5)->by('auth-register|'.$request->ip());
         });
 
         RateLimiter::for('auth-login', function (Request $request) {
             return Limit::perMinute(5)->by('auth-login|'.$request->ip());
+        });
+
+        // PRD 6: 60 requests per minute per user for the authenticated API
+        // (heartbeat and auth routes have their own limiters).
+        RateLimiter::for('api-user', function (Request $request) {
+            return Limit::perMinute(60)->by('api-user|'.($request->user()?->id ?? $request->ip()));
+        });
+
+        // PRD 6: "heartbeats exempt (1 per 15 s minimum enforced)" — four
+        // per minute comfortably covers the 20 s client cadence (fixed
+        // window: sustained traffic is 3/min) while still bounding abuse.
+        RateLimiter::for('heartbeat', function (Request $request) {
+            return Limit::perMinute(4)->by('heartbeat|'.($request->user()?->id ?? $request->ip()));
         });
     }
 }

@@ -1,4 +1,5 @@
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+import { RUN, USERS, apiPost, loginContext, registerUser } from "./helpers";
 
 /**
  * Milestone 2 acceptance (PRD 14): "the Playwright two-browser sync test
@@ -9,104 +10,9 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
  * Reverb on :8080, Next.js on :3000. If the API's rate limiter is
  * warm from earlier runs, clear it first: `php artisan cache:clear`.
  *
- * Requests go through the browser contexts (not Node fetch) so they carry
- * the Sanctum stateful markers: the localhost cookie jar, a Referer from
- * the frontend origin, and the XSRF token — without those the API has no
- * session store and rejects the call.
- *
- * Users are registered once per run (the register endpoint is throttled)
- * and reused by every test; each test logs them into fresh contexts.
+ * Auth and SPA request plumbing live in ./helpers (shared with the
+ * Milestone 3 presence suite).
  */
-
-const API_URL = process.env.E2E_API_URL ?? "http://localhost:8000";
-const WEB_URL = process.env.E2E_WEB_URL ?? "http://localhost:3000";
-
-const RUN = Date.now();
-
-type User = { email: string; password: string };
-
-const USERS: Record<"host" | "mate", User> = {
-  host: { email: `e2e-host-${RUN}@example.com`, password: "secret123" },
-  mate: { email: `e2e-mate-${RUN}@example.com`, password: "secret123" },
-};
-
-async function xsrfToken(context: BrowserContext): Promise<string> {
-  const cookie = (await context.cookies()).find((c) => c.name === "XSRF-TOKEN")?.value;
-  return cookie ? decodeURIComponent(cookie) : "";
-}
-
-async function spaPost(
-  context: BrowserContext,
-  path: string,
-  data?: unknown,
-): Promise<{ ok: boolean; status: number; body: string }> {
-  const res = await context.request.post(`${API_URL}${path}`, {
-    headers: {
-      Accept: "application/json",
-      Referer: `${WEB_URL}/`,
-      "X-XSRF-TOKEN": await xsrfToken(context),
-    },
-    data,
-  });
-
-  return { ok: res.ok(), status: res.status(), body: await res.text() };
-}
-
-async function fetchCsrf(context: BrowserContext): Promise<void> {
-  await context.request.get(`${API_URL}/sanctum/csrf-cookie`, {
-    headers: { Referer: `${WEB_URL}/` },
-  });
-}
-
-/** Register through the SPA flow (also logs the user in). */
-async function registerUser(context: BrowserContext, user: User, name: string): Promise<void> {
-  await fetchCsrf(context);
-
-  const res = await spaPost(context, "/api/v1/auth/register", {
-    name,
-    email: user.email,
-    password: user.password,
-    password_confirmation: user.password,
-  });
-
-  if (!res.ok) {
-    throw new Error(`register(${user.email}) failed: ${res.status} ${res.body}`);
-  }
-}
-
-/** Establish a session in the context via the real login endpoint. */
-async function loginContext(context: BrowserContext, user: User): Promise<void> {
-  await fetchCsrf(context);
-
-  const res = await spaPost(context, "/api/v1/auth/login", {
-    email: user.email,
-    password: user.password,
-  });
-
-  if (!res.ok) {
-    throw new Error(`login(${user.email}) failed: ${res.status} ${res.body}`);
-  }
-}
-
-/** Authenticated API call from inside a browser context (SPA XSRF flow). */
-async function apiPost(
-  context: BrowserContext,
-  path: string,
-  data?: unknown,
-): Promise<Record<string, unknown>> {
-  const res = await context.request.post(`${API_URL}/api/v1${path}`, {
-    headers: {
-      Accept: "application/json",
-      Referer: `${WEB_URL}/`,
-      "X-XSRF-TOKEN": await xsrfToken(context),
-    },
-    data,
-  });
-
-  expect(res.ok(), `POST ${path} -> ${res.status()} ${await res.text()}`).toBeTruthy();
-
-  return res.json();
-}
 
 /** Parse "M:SS" / "H:MM:SS" into total seconds. */
 function toSeconds(text: string): number {

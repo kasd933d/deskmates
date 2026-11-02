@@ -75,6 +75,8 @@ export type TimerState = {
 export type RoomStateResponse = {
   room: Room;
   timer: TimerState;
+  /** Milestone 3: member cards seed the grid; presence keeps it live. */
+  members: RoomMemberCard[];
   server_now_ms: number;
 };
 
@@ -95,4 +97,69 @@ export type RoomPhaseChangedEvent = {
   cycle_index: number;
   phase_version: number | null;
   server_now_ms: number;
+};
+
+/** PRD 4.4: member card status dot states. */
+export type MemberStatus = "focusing" | "break" | "away";
+
+/** PRD 4.4: a member card — avatar, name, intention and status dot. */
+export type RoomMemberCard = {
+  user_id: number;
+  name: string | null;
+  avatar_emoji: string | null;
+  avatar_color: string | null;
+  intention: string | null;
+  status: MemberStatus;
+  is_host: boolean;
+  is_muted: boolean;
+  joined_at: string | null;
+};
+
+/** Payload of the MemberRemoved broadcast (presence channel). */
+export type MemberRemovedEvent = {
+  room_id: number;
+  user_id: number;
+};
+
+/** Payload of the MemberStatusChanged broadcast (presence channel). */
+export type MemberStatusChangedEvent = {
+  room_id: number;
+  user_id: number;
+  status: MemberStatus;
+};
+
+/** Payload of the IntentionUpdated broadcast (room channel). */
+export type IntentionUpdatedEvent = {
+  room_id: number;
+  user_id: number;
+  intention: string | null;
+};
+
+/**
+ * Payload of the RoomSettingsUpdated broadcast (room channel): the host id
+ * plus whichever room config keys the host may change (all present on emit).
+ */
+export type RoomSettingsUpdatedEvent = {
+  room_id: number;
+  host_id: number;
+  server_now_ms: number;
+  name?: string;
+  theme?: string;
+  focus_minutes?: number;
+  short_break_minutes?: number;
+  long_break_minutes?: number;
+  long_break_every?: number;
+  max_members?: number;
+  silent_focus?: boolean;
+};
+
+/**
+ * `user_info` signed into a presence channel's channel_data — the shape
+ * .here() / .joining() / .leaving() deliver (channels.php return array).
+ */
+export type PresenceUserInfo = {
+  id: number;
+  name: string;
+  avatar_emoji: string;
+  avatar_color: string;
 };

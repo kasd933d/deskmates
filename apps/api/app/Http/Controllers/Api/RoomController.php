@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreRoomRequest;
 use App\Http\Resources\RoomResource;
 use App\Models\Room;
-use App\Models\RoomMember;
+use App\Services\PresenceService;
 use App\Services\RoomClockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -49,9 +49,9 @@ class RoomController extends Controller
         ]);
     }
 
-    public function store(StoreRoomRequest $request): JsonResponse
+    public function store(StoreRoomRequest $request, PresenceService $presence): JsonResponse
     {
-        $room = DB::transaction(function () use ($request) {
+        $room = DB::transaction(function () use ($request, $presence) {
             $data = $request->validated();
 
             $room = Room::create([
@@ -61,12 +61,9 @@ class RoomController extends Controller
                 'last_active_at' => now(),
             ]);
 
-            RoomMember::create([
-                'room_id' => $room->id,
-                'user_id' => $request->user()->id,
-                'joined_at' => now(),
-                'last_seen_at' => now(),
-            ]);
+            // Creating a room auto-joins it, so the one-room rule applies
+            // here too: any previous membership is moved, not duplicated.
+            $presence->moveToRoom($request->user(), $room);
 
             return $room;
         });
@@ -94,13 +91,18 @@ class RoomController extends Controller
         // job ran (idempotent, cheap check on every state fetch).
         $clock->advanceIfExpired($room, $nowMs);
 
+        $fresh = $room->fresh(['members.user']);
+
         $timer = $room->isAlwaysOn()
             ? $clock->alwaysOnPhase($room, $nowMs)
-            : $clock->userRoomState($room->fresh());
+            : $clock->userRoomState($fresh);
 
         return response()->json([
             'room' => (new RoomResource($room))->toArray($request),
             'timer' => $timer,
+            // Milestone 3: member cards (avatar, name, intention, status dot)
+            // seed the grid; the presence channel keeps it live.
+            'members' => app(PresenceService::class)->memberCards($fresh, $timer['phase']),
             'server_now_ms' => $nowMs,
         ]);
     }
@@ -136,7 +138,7 @@ class RoomController extends Controller
         return response()->json(['message' => 'Room closed']);
     }
 
-    public function join(Request $request, Room $room): JsonResponse
+    public function join(Request $request, Room $room, PresenceService $presence): JsonResponse
     {
         $this->authorize('join', $room);
 
@@ -144,27 +146,25 @@ class RoomController extends Controller
             $request->validate(['invite_code' => ['required', 'string', Rule::in([$room->invite_code])]]);
         }
 
-        $user = $request->user();
-
-        RoomMember::updateOrCreate(
-            ['user_id' => $user->id],
-            [
-                'room_id' => $room->id,
-                'joined_at' => now(),
-                'last_seen_at' => now(),
-            ],
-        );
+        // One-room rule (PRD M3): joining elsewhere moves this user's single
+        // membership, broadcasts MemberRemoved to the old room and transfers
+        // its hostship if they were the host.
+        $presence->moveToRoom($request->user(), $room);
 
         return response()->json([
             'room' => (new RoomResource($room->fresh()->load('host', 'members')))->toArray($request),
         ]);
     }
 
-    public function leave(Request $request, Room $room): JsonResponse
+    public function leave(Request $request, Room $room, PresenceService $presence): JsonResponse
     {
-        RoomMember::where('user_id', $request->user()->id)
-            ->where('room_id', $room->id)
-            ->delete();
+        $member = $room->members()
+            ->where('user_id', $request->user()->id)
+            ->first();
+
+        if ($member !== null) {
+            $presence->removeMember($member);
+        }
 
         return response()->json(['message' => 'Left room']);
     }

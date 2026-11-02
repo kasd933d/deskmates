@@ -57,10 +57,12 @@ class TimerTest extends TestCase
 
         $this->assertNotNull($response->json('timer.phase_ends_at_ms'));
 
-        // phase_ends_at stores second precision, so the remaining time can be
-        // up to 999 ms short of exactly 25 minutes.
+        // phase_ends_at stores second precision (up to 999 ms short of
+        // exactly 25 minutes) and server_now_ms ticks a moment later while
+        // the response is built, so allow 3 s of slack — a wrong phase
+        // length would still be off by a minute or more.
         $remaining = $response->json('timer.phase_ends_at_ms') - $response->json('server_now_ms');
-        $this->assertGreaterThan(25 * 60 * 1000 - 1000, $remaining);
+        $this->assertGreaterThan(25 * 60 * 1000 - 3000, $remaining);
         $this->assertLessThanOrEqual(25 * 60 * 1000, $remaining);
 
         Event::assertDispatched(RoomPhaseChanged::class, fn (RoomPhaseChanged $e) => $e->roomId === $room->id);

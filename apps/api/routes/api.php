@@ -3,6 +3,7 @@
 use App\Events\PingReceived;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\RoomController;
 use App\Http\Controllers\Api\TimerController;
 use Illuminate\Http\Request;
@@ -49,8 +50,9 @@ Route::prefix('v1')->group(function () {
     |----------------------------------------------------------------------
     | Me (P0)
     |----------------------------------------------------------------------
+    | PRD 6: 60 requests per minute per user across the authenticated API.
     */
-    Route::middleware('auth')->group(function () {
+    Route::middleware(['auth', 'throttle:api-user'])->group(function () {
         Route::get('/me', [MeController::class, 'show']);
         Route::patch('/me', [MeController::class, 'update']);
         Route::delete('/me', [MeController::class, 'destroy']);
@@ -69,7 +71,19 @@ Route::prefix('v1')->group(function () {
         Route::post('/rooms/{room}/leave', [RoomController::class, 'leave']);
         Route::post('/rooms/{room}/timer/{action}', TimerController::class)
             ->whereIn('action', ['start', 'pause', 'skip', 'reset']);
+
+        /*
+        |----------------------------------------------------------------------
+        | Presence and membership (Milestone 3)
+        |----------------------------------------------------------------------
+        */
+        Route::patch('/rooms/{room}/intention', [PresenceController::class, 'updateIntention']);
     });
+
+    // Heartbeats sit outside the api-user bucket (PRD 6: "heartbeats
+    // exempt") and carry their own 1-per-15 s limiter instead.
+    Route::post('/rooms/{room}/heartbeat', [PresenceController::class, 'heartbeat'])
+        ->middleware(['auth', 'throttle:heartbeat']);
 
     /*
     |----------------------------------------------------------------------
@@ -78,5 +92,5 @@ Route::prefix('v1')->group(function () {
     */
     Route::get('/time', function () {
         return response()->json(['server_now_ms' => (int) now()->getTimestampMs()]);
-    })->middleware('throttle:120,1');
+    })->middleware('throttle:30,1');
 });

@@ -1,5 +1,6 @@
 import Echo from "laravel-echo";
 import Pusher from "pusher-js";
+import { api } from "@/lib/api";
 
 let echoInstance: Echo<"reverb"> | null = null;
 
@@ -29,6 +30,25 @@ export function getEcho(): Echo<"reverb"> {
     forceTLS: scheme === "secure",
     enabledTransports: ["ws", "wss"],
     disableStats: true,
+    // Private/presence channels authorize through the API with the SPA's
+    // cookies + XSRF token (pusher-js 8: customHandler replaces the old
+    // cross-origin authEndpoint flow, which cannot carry either).
+    channelAuthorization: {
+      customHandler: ({ channelName, socketId }, callback) => {
+        api<{ auth: string; channel_data?: string }>("/broadcasting/auth", {
+          method: "POST",
+          body: { channel_name: channelName, socket_id: socketId },
+          csrf: true,
+        })
+          .then((data) => callback(null, data))
+          .catch((err: unknown) =>
+            callback(
+              err instanceof Error ? err : new Error("Channel authorization failed."),
+              null,
+            ),
+          );
+      },
+    },
   });
 
   return echoInstance;
