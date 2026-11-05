@@ -47,5 +47,19 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('heartbeat', function (Request $request) {
             return Limit::perMinute(4)->by('heartbeat|'.($request->user()?->id ?? $request->ip()));
         });
+
+        // PRD 4.6: chat — 1 message per 2 seconds and 20 per minute, per
+        // user. The two limits MUST sign distinct keys: the throttle
+        // middleware hashes (limiter name + by()) into one counter, so a
+        // shared by() would make the burst window and the minute window
+        // fight over the same bucket.
+        RateLimiter::for('chat-send', function (Request $request) {
+            $by = $request->user()?->id ?? $request->ip();
+
+            return [
+                Limit::perSecond(1, 2)->by('chat-burst|'.$by),
+                Limit::perMinute(20)->by('chat-minute|'.$by),
+            ];
+        });
     }
 }

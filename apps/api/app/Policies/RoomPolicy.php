@@ -51,4 +51,14 @@ class RoomPolicy
         // controller after this policy check passes.
         return $room->archived_at === null;
     }
+
+    /**
+     * PRD 4.6/4.12: kick/ban/mute. Hosts moderate their own room; admins
+     * moderate everywhere (always-on rooms have no host — per the M1
+     * decision, admins moderate users, never the deterministic clock).
+     */
+    public function moderate(User $user, Room $room): bool
+    {
+        return $user->isAdmin() || $room->isHost($user);
+    }
 }

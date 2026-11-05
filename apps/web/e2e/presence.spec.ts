@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext, type Page, type Response } from "@playwright/test";
-import { RUN, USERS, apiGet, apiPost, loginContext, registerUser } from "./helpers";
+import { RUN, USERS, apiGet, apiPost, dismissRules, loginContext, registerUser } from "./helpers";
 
 /**
  * Milestone 3 acceptance (PRD 14): "members appear/disappear live, closing
@@ -110,6 +110,8 @@ test.describe("live presence (Milestone 3)", () => {
       await expect(memberCards(hostPage).filter({ hasText: "E2E mate" })).toHaveCount(1);
 
       // PRD 4.5: an intention is visible to the room as soon as it is saved.
+      // (The M4 rules prompt overlays a first join — dismiss it first.)
+      await dismissRules(matePage);
       await matePage.locator("#intention").fill("Ship milestone 3");
       await matePage.locator("#intention").press("Enter");
 

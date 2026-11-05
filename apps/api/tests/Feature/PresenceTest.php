@@ -11,6 +11,7 @@ use App\Models\RoomMember;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
+use Tests\Feature\Concerns\AuthorizesPusherChannels;
 use Tests\TestCase;
 
 /**
@@ -20,6 +21,7 @@ use Tests\TestCase;
  */
 class PresenceTest extends TestCase
 {
+    use AuthorizesPusherChannels;
     use RefreshDatabase;
 
     private function makeRoom(User $host, array $overrides = []): Room
@@ -47,33 +49,6 @@ class PresenceTest extends TestCase
         ], $overrides));
     }
 
-    /**
-     * phpunit.xml pins BROADCAST_CONNECTION=null, whose auth() is a no-op —
-     * channel authorization must run against a real driver. Pusher signs the
-     * auth HMAC locally (no HTTP), so flipping the default connection to
-     * pusher with dummy credentials exercises the real response shape while
-     * staying offline. Only auth tests use this: actual event broadcasts
-     * would hit the network.
-     */
-    private function usePusherChannelAuth(): void
-    {
-        config([
-            'broadcasting.default' => 'pusher',
-            'broadcasting.connections.pusher' => [
-                'driver' => 'pusher',
-                'key' => 'test-key',
-                'secret' => 'test-secret',
-                'app_id' => '123456',
-                'options' => [],
-            ],
-        ]);
-
-        // channels.php registered its callbacks on the driver that was
-        // default at boot (null); re-require so the freshly resolved pusher
-        // driver has them too (registration keys by pattern — idempotent).
-        require base_path('routes/channels.php');
-    }
-
     /*
     |----------------------------------------------------------------------
     | Heartbeats (PRD 4.4)
@@ -97,8 +72,10 @@ class PresenceTest extends TestCase
         $member->refresh();
         $this->assertNotNull($member->last_seen_at);
         $this->assertNull($member->hidden_since);
-        $this->assertEquals(now()->getTimestamp(), $member->last_seen_at->getTimestamp());
-        $this->assertEquals(now()->getTimestamp(), $room->fresh()->last_active_at->getTimestamp());
+        // ±1 s: the heartbeat and the assertion can straddle a second
+        // boundary (PRD 11 allows a displayed time within ±1 s).
+        $this->assertEqualsWithDelta(now()->getTimestamp(), $member->last_seen_at->getTimestamp(), 1);
+        $this->assertEqualsWithDelta(now()->getTimestamp(), $room->fresh()->last_active_at->getTimestamp(), 1);
     }
 
     public function test_heartbeat_during_focus_reports_focusing(): void

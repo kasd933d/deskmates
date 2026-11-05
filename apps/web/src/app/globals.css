@@ -12,6 +12,28 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* PRD 4.7: reactions float up the screen (duration matches
+   FLOAT_DURATION_MS in src/lib/reactions.ts). Applied only under
+   `motion-safe:` — reduced-motion users get counters instead. */
+@theme {
+  --animate-reaction-float: reaction-float 2.6s ease-out forwards;
+
+  @keyframes reaction-float {
+    0% {
+      transform: translateY(0) scale(0.7);
+      opacity: 0;
+    }
+    12% {
+      transform: translateY(-24px) scale(1.15);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-70vh) scale(1);
+      opacity: 0;
+    }
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;

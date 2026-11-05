@@ -36,6 +36,14 @@ export function Nav() {
               >
                 New room
               </Link>
+              {user.role === "admin" && (
+                <Link
+                  href="/admin/reports"
+                  className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                >
+                  Reports
+                </Link>
+              )}
               <Link
                 href="/settings"
                 className="flex items-center gap-1.5 text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"

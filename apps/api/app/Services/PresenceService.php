@@ -274,6 +274,14 @@ class PresenceService
      */
     private function restoreMembership(Room $room, User $user): ?RoomMember
     {
+        // PRD 4.12: a ban outlives the membership row — the self-heal path
+        // must never resurrect a banned seat.
+        if ($room->isBanned((int) $user->id)) {
+            throw new HttpResponseException(response()->json([
+                'message' => 'You are banned from this room.',
+            ], 403));
+        }
+
         // Membership exists in ANOTHER room: another tab joined elsewhere
         // (one-room rule). Rejoining here would start a two-tab tug of war.
         $elsewhere = RoomMember::query()->where('user_id', $user->id)->first();

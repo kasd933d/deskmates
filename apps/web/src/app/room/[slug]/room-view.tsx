@@ -7,14 +7,32 @@ import { useHeartbeat } from "@/hooks/useHeartbeat";
 import { api, ApiError } from "@/lib/api";
 import { getEcho } from "@/lib/echo";
 import { serverClock } from "@/lib/clock";
+import {
+  FLOAT_DURATION_MS,
+  INCOMING_LIMIT,
+  INCOMING_WINDOW_MS,
+  createBurstGate,
+  isReactionEmoji,
+} from "@/lib/reactions";
+import { ChatPanel } from "@/components/room/ChatPanel";
 import { IntentionEditor } from "@/components/room/IntentionEditor";
-import { MemberGrid } from "@/components/room/MemberGrid";
+import { MemberGrid, type ModerationAction } from "@/components/room/MemberGrid";
+import { ReactionBar } from "@/components/room/ReactionBar";
+import { ReportDialog } from "@/components/room/ReportDialog";
 import { Timer } from "@/components/room/Timer";
 import type {
+  ChatMessage,
+  FloatingReaction,
   IntentionUpdatedEvent,
+  MemberKickedEvent,
   MemberRemovedEvent,
+  MemberMutedEvent,
   MemberStatusChangedEvent,
+  MessageDeletedEvent,
+  MessagesResponse,
   PresenceUserInfo,
+  ReactionEmoji,
+  ReactionPayload,
   Room,
   RoomMemberCard,
   RoomPhaseChangedEvent,
@@ -44,6 +62,9 @@ const ROOM_SETTING_KEYS = [
   "silent_focus",
 ] as const;
 
+/** PRD 4.12: community rules are shown on first join (once per browser). */
+const RULES_SEEN_KEY = "deskmates.rulesSeen";
+
 /**
  * The room view: fully client-driven (session-gated, live-synced timer).
  * Rendered inside a <Suspense> boundary by page.tsx so Next 16 can
@@ -70,13 +91,46 @@ export function RoomView() {
   // Set only by the server's verdict (409 kicked / 403 gone): stops the
   // heartbeat and the presence subscription.
   const [stopped, setStopped] = useState(false);
+  // M4: chat history, floating reactions, report dialog, rules prompt and
+  // the host's silent-focus switch.
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [floats, setFloats] = useState<FloatingReaction[]>([]);
+  const [reportTarget, setReportTarget] = useState<{
+    user: { id: number; name: string };
+    messageId: number | null;
+  } | null>(null);
+  const [showRules, setShowRules] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const autoJoinTriedRef = useRef<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clockSubscribed = useRef(false);
+  // M4 reaction plumbing: the presence effect hands the whisper sender to
+  // the bar, the gate drops inbound bursts, floats get unique keys.
+  const sendReactionRef = useRef<((emoji: ReactionEmoji) => void) | null>(null);
+  const incomingGateRef = useRef(createBurstGate(INCOMING_LIMIT, INCOMING_WINDOW_MS));
+  const floatIdRef = useRef(0);
+  const rulesPromptedRef = useRef(false);
 
   const userId = user?.id ?? null;
   const isMember = userId !== null && members.some((m) => m.user_id === userId);
   const ownCard = userId !== null ? (members.find((m) => m.user_id === userId) ?? null) : null;
+
+  const roomId = room?.id;
+  const isHost = room?.is_host ?? false;
+  const canModerateRoom = isHost || user?.role === "admin";
+  const muted = ownCard?.is_muted ?? false;
+  // PRD 4.6: silent focus mutes everyone (host included) during focus —
+  // mirrors the server's check in MessageController::store.
+  const silentNow = (room?.silent_focus ?? false) && timer?.phase === "focus";
+  const inRoom = isMember && !stopped;
+  const chatEnabled = inRoom && !muted && !silentNow;
+  const chatDisabledReason = !inRoom
+    ? "Join the room to chat."
+    : muted
+      ? "You are muted by the host."
+      : silentNow
+        ? "Silent focus is on — chat resumes after the break. Reactions only."
+        : null;
 
   const loadRoom = useCallback(async () => {
     try {
@@ -111,6 +165,18 @@ export function RoomView() {
     return () => {
       if (refreshTimerRef.current !== null) clearTimeout(refreshTimerRef.current);
     };
+  }, []);
+
+  /** PRD 4.7: show a float, then retire it once its animation is done. */
+  const addFloat = useCallback((emoji: ReactionEmoji, reactingUserId: number | null) => {
+    const id = ++floatIdRef.current;
+    setFloats((prev) => [
+      ...prev,
+      { id, emoji, x: 6 + Math.random() * 84, user_id: reactingUserId },
+    ]);
+    setTimeout(() => {
+      setFloats((prev) => prev.filter((f) => f.id !== id));
+    }, FLOAT_DURATION_MS);
   }, []);
 
   useEffect(() => {
@@ -172,6 +238,42 @@ export function RoomView() {
         setError(err instanceof ApiError ? err.message : "Could not join this room.");
       });
   }, [room, user, isMember, stopped, loadRoom]);
+
+  // M4: chat history once we hold membership (PRD 4.6 — the endpoint only
+  // serves members; a 403 here just leaves the panel empty).
+  useEffect(() => {
+    const id = room?.id;
+    if (id === undefined || !isMember || stopped) return;
+    let cancelled = false;
+    api<MessagesResponse>(`/api/v1/rooms/${id}/messages`)
+      .then((data) => {
+        if (!cancelled) setMessages(data.messages);
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [room?.id, isMember, stopped]);
+
+  // PRD 4.12: community rules shown on first join of any room — once per
+  // browser (decision logged in docs/decisions.md). Deferred a tick so the
+  // storage read + setState are not a synchronous effect-body write and so
+  // StrictMode's double-invoke still prompts (the guard lives in the timer).
+  useEffect(() => {
+    if (!isMember) return;
+    const timerId = setTimeout(() => {
+      if (rulesPromptedRef.current) return;
+      rulesPromptedRef.current = true;
+      try {
+        if (localStorage.getItem(RULES_SEEN_KEY) === null) setShowRules(true);
+      } catch {
+        // Storage unavailable (private mode) — skip rather than loop.
+      }
+    }, 0);
+    return () => clearTimeout(timerId);
+  }, [isMember]);
 
   // Clock sync: start as soon as we know we are on this page.
   useEffect(() => {
@@ -313,12 +415,79 @@ export function RoomView() {
       );
     });
 
+    // M4 chat (PRD 4.6): live bubbles on the same presence channel as the
+    // members — lurkers and banned users never get them.
+    presence.listen("MessageSent", (payload: ChatMessage) => {
+      setMessages((prev) =>
+        prev.some((m) => m.id === payload.id) ? prev : [...prev, payload],
+      );
+    });
+
+    presence.listen("MessageDeleted", (payload: MessageDeletedEvent) => {
+      setMessages((prev) => prev.filter((m) => m.id !== payload.message_id));
+    });
+
+    // M4 moderation: the 🔇 badge and our own composer flip live.
+    presence.listen("MemberMuted", (payload: MemberMutedEvent) => {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.user_id === payload.user_id ? { ...m, is_muted: payload.is_muted } : m,
+        ),
+      );
+    });
+
+    // M4 reactions (PRD 4.7): whispers from everyone else. Reverb does not
+    // echo a whisper back to its sender, so our own floats are rendered by
+    // handleReact instead. Bursts above the limit are dropped.
+    presence.listenForWhisper(
+      "reaction",
+      (data: ReactionPayload, metadata?: { user_id?: string }) => {
+        if (!isReactionEmoji(data?.emoji)) return;
+        if (!incomingGateRef.current()) return;
+        addFloat(data.emoji, metadata?.user_id ? Number(metadata.user_id) : null);
+      },
+    );
+
+    sendReactionRef.current = (emoji) => {
+      presence.whisper("reaction", { emoji });
+    };
+
     return () => {
+      sendReactionRef.current = null;
       echo.leave(channelName);
     };
     // `room?.id` is the subscription identity: room objects are recreated
     // by every refetch, which must not churn the socket subscription.
-  }, [room?.id, hasJoined, stopped, userId, loadRoom, scheduleRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [room?.id, hasJoined, stopped, userId, loadRoom, scheduleRefresh, addFloat]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // M4 moderation (PRD 7.2): the verdict rides our private channel — a
+  // presence MemberRemoved alone cannot say "you were kicked" vs "you
+  // left". Subscribed whenever we have a user, so the message is not lost
+  // between the kick and the next membership.
+  useEffect(() => {
+    if (userId === null || roomId === undefined) return;
+
+    const echo = getEcho();
+    const channel = echo.private(`user.${userId}`);
+    const onKicked = (payload: MemberKickedEvent) => {
+      if (payload.room_id !== roomId) return;
+      setStopped(true);
+      setNotice(
+        payload.reason === "banned"
+          ? "You were banned from this room and cannot rejoin."
+          : "You were kicked from this room. You can rejoin.",
+      );
+      setMembers((prev) => prev.filter((m) => m.user_id !== userId));
+      setMessages([]);
+    };
+
+    channel.listen("MemberKicked", onKicked);
+
+    return () => {
+      channel.stopListening("MemberKicked", onKicked);
+      echo.leave(`user.${userId}`);
+    };
+  }, [userId, roomId]);
 
   async function handleJoin() {
     if (!room) return;
@@ -380,6 +549,113 @@ export function RoomView() {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Milestone 4 — chat (PRD 4.6)
+  // ---------------------------------------------------------------------
+
+  async function handleSend(body: string) {
+    if (roomId === undefined) throw new Error("Not in a room yet.");
+    const data = await api<{ message: ChatMessage }>(`/api/v1/rooms/${roomId}/messages`, {
+      method: "POST",
+      body: { body },
+      csrf: true,
+    });
+    // The presence broadcast also delivers our own message — dedupe by id
+    // so whichever arrives first wins.
+    setMessages((prev) =>
+      prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message],
+    );
+  }
+
+  async function handleDelete(message: ChatMessage) {
+    if (roomId === undefined) return;
+    try {
+      await api(`/api/v1/rooms/${roomId}/messages/${message.id}`, {
+        method: "DELETE",
+        csrf: true,
+      });
+      // Optimistic; MessageDeleted confirms for everyone else (idempotent).
+      setMessages((prev) => prev.filter((m) => m.id !== message.id));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete the message.");
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Milestone 4 — reactions (PRD 4.7)
+  // ---------------------------------------------------------------------
+
+  function handleReact(emoji: ReactionEmoji) {
+    // Reverb excludes the sender from its own rebroadcast (verified in
+    // Channel::broadcast) — show our float locally, whisper to the rest.
+    addFloat(emoji, userId);
+    sendReactionRef.current?.(emoji);
+  }
+
+  // ---------------------------------------------------------------------
+  // Milestone 4 — moderation (PRD 4.12)
+  // ---------------------------------------------------------------------
+
+  async function handleModerate(action: ModerationAction, member: RoomMemberCard) {
+    if (roomId === undefined) return;
+    try {
+      if (action === "mute" || action === "unmute") {
+        await api(`/api/v1/rooms/${roomId}/members/${member.user_id}/mute`, {
+          method: "POST",
+          body: { muted: action === "mute" },
+          csrf: true,
+        });
+        // MemberMuted broadcast flips the badge and the composer.
+        return;
+      }
+
+      await api(`/api/v1/rooms/${roomId}/members/${member.user_id}/${action}`, {
+        method: "POST",
+        csrf: true,
+      });
+      // Optimistic removal; MemberRemoved + MemberKicked confirm live.
+      setMembers((prev) => prev.filter((m) => m.user_id !== member.user_id));
+      setNotice(
+        action === "ban"
+          ? `${member.name ?? "Member"} was banned from this room.`
+          : `${member.name ?? "Member"} was kicked. They can rejoin.`,
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Moderation action failed.");
+    }
+  }
+
+  async function handleSilentFocus(enabled: boolean) {
+    if (roomId === undefined) return;
+    setSettingsSaving(true);
+    try {
+      await api(`/api/v1/rooms/${roomId}`, {
+        method: "PATCH",
+        body: { silent_focus: enabled },
+        csrf: true,
+      });
+      // Optimistic; RoomSettingsUpdated confirms for every client.
+      setRoom((prev) => (prev ? { ...prev, silent_focus: enabled } : prev));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not update silent focus.");
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
+
+  function openReport(user: { id: number; name: string }, messageId: number | null) {
+    setReportTarget({ user, messageId });
+  }
+
+  function dismissRules() {
+    setShowRules(false);
+    try {
+      localStorage.setItem(RULES_SEEN_KEY, "1");
+    } catch {
+      // Storage unavailable — the prompt may show again next visit.
+    }
+  }
+
   if (authLoading || (!user && !error)) {
     return <p className="p-8 text-center text-zinc-500">Loading…</p>;
   }
@@ -402,7 +678,6 @@ export function RoomView() {
     return <p className="p-8 text-center text-zinc-500">Loading…</p>;
   }
 
-  const isHost = room.is_host;
   const showHostControls = isHost && room.type !== "always_on";
 
   return (
@@ -425,40 +700,55 @@ export function RoomView() {
       </div>
 
       {showHostControls && (
-        <div className="flex flex-wrap justify-center gap-2">
-          {timer.phase === "idle" ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap justify-center gap-2">
+            {timer.phase === "idle" ? (
+              <button
+                onClick={() => handleTimerAction("start")}
+                disabled={acting}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                ▶ Start focus
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleTimerAction("skip")}
+                  disabled={acting}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+                >
+                  ⏭ Skip phase
+                </button>
+                <button
+                  onClick={() => handleTimerAction("pause")}
+                  disabled={acting}
+                  className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                >
+                  ⏸ Pause
+                </button>
+              </>
+            )}
             <button
-              onClick={() => handleTimerAction("start")}
-              disabled={acting}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              onClick={() => handleTimerAction("reset")}
+              disabled={acting || timer.phase === "idle"}
+              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
             >
-              ▶ Start focus
+              ↺ Reset
             </button>
-          ) : (
-            <>
-              <button
-                onClick={() => handleTimerAction("skip")}
-                disabled={acting}
-                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-              >
-                ⏭ Skip phase
-              </button>
-              <button
-                onClick={() => handleTimerAction("pause")}
-                disabled={acting}
-                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                ⏸ Pause
-              </button>
-            </>
-          )}
-          <button
-            onClick={() => handleTimerAction("reset")}
-            disabled={acting || timer.phase === "idle"}
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            ↺ Reset
-          </button>
+          </div>
+
+          {/* PRD 4.6: silent focus mutes everyone's chat during focus. */}
+          <label className="flex items-center justify-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+            <input
+              type="checkbox"
+              checked={room.silent_focus}
+              disabled={settingsSaving}
+              onChange={(e) => void handleSilentFocus(e.target.checked)}
+              data-testid="silent-focus"
+              className="h-4 w-4 rounded border-zinc-300"
+            />
+            Silent focus (mute chat during focus)
+          </label>
         </div>
       )}
 
@@ -469,7 +759,47 @@ export function RoomView() {
         />
       )}
 
-      <MemberGrid members={members} />
+      {inRoom && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+          <ReactionBar
+            enabled
+            disabledReason={null}
+            onReact={handleReact}
+            floats={floats}
+          />
+          <span className="shrink-0 text-xs text-zinc-400" aria-hidden>
+            react
+          </span>
+        </div>
+      )}
+
+      {inRoom && (
+        <ChatPanel
+          messages={messages}
+          currentUserId={userId}
+          canModerate={canModerateRoom}
+          enabled={chatEnabled}
+          disabledReason={chatDisabledReason}
+          onSend={handleSend}
+          onDelete={(message) => void handleDelete(message)}
+          onReport={(message) =>
+            openReport(
+              { id: message.user_id, name: message.name ?? "Member" },
+              message.id,
+            )
+          }
+        />
+      )}
+
+      <MemberGrid
+        members={members}
+        currentUserId={userId}
+        canModerate={canModerateRoom}
+        onReport={(member) =>
+          openReport({ id: member.user_id, name: member.name ?? "Member" }, null)
+        }
+        onModerate={(action, member) => void handleModerate(action, member)}
+      />
 
       <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="grid grid-cols-2 gap-4 text-sm">
@@ -538,6 +868,49 @@ export function RoomView() {
       >
         ← Back to lobby
       </button>
+
+      {reportTarget && roomId !== undefined && (
+        <ReportDialog
+          key={`${reportTarget.user.id}:${reportTarget.messageId ?? "user"}`}
+          open
+          roomId={roomId}
+          target={reportTarget.user}
+          messageId={reportTarget.messageId}
+          onClose={() => setReportTarget(null)}
+        />
+      )}
+
+      {/* PRD 4.12: community rules on first join of any room. */}
+      {showRules && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Community rules"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
+            <h2 className="text-lg font-semibold">Community rules</h2>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Welcome to DeskMates — a shared focus space. Please:
+            </p>
+            <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm text-zinc-600 dark:text-zinc-300">
+              <li>Be kind and stay on topic in chat.</li>
+              <li>No spam, advertising or flooding the room.</li>
+              <li>Respect silent focus: during focus, only reactions.</li>
+              <li>Report abuse instead of replying to it.</li>
+              <li>Hosts moderate their rooms; admins moderate everything.</li>
+            </ul>
+            <button
+              type="button"
+              onClick={dismissRules}
+              data-testid="rules-accept"
+              className="mt-5 w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

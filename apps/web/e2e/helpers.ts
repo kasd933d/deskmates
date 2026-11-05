@@ -1,4 +1,4 @@
-import { expect, type BrowserContext } from "@playwright/test";
+import { expect, type BrowserContext, type Page } from "@playwright/test";
 
 /**
  * Shared SPA auth helpers for the e2e suites (Milestone 2 timer sync,
@@ -138,4 +138,16 @@ export async function apiGet<T>(context: BrowserContext, path: string): Promise<
   expect(res.ok(), `GET ${path} -> ${res.status()} ${body}`).toBeTruthy();
 
   return JSON.parse(body) as T;
+}
+
+/**
+ * PRD 4.12: the community-rules prompt overlays the room on a browser's
+ * first join (fresh contexts always qualify), so any spec that interacts
+ * with the page must dismiss it first. Skips when the localStorage flag
+ * says this profile has already seen the rules.
+ */
+export async function dismissRules(page: Page): Promise<void> {
+  const seen = await page.evaluate(() => localStorage.getItem("deskmates.rulesSeen"));
+  if (seen !== null) return;
+  await page.getByTestId("rules-accept").click({ timeout: 60_000 });
 }

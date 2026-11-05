@@ -3,7 +3,10 @@
 use App\Events\PingReceived;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\ModerationController;
 use App\Http\Controllers\Api\PresenceController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoomController;
 use App\Http\Controllers\Api\TimerController;
 use Illuminate\Http\Request;
@@ -78,6 +81,29 @@ Route::prefix('v1')->group(function () {
         |----------------------------------------------------------------------
         */
         Route::patch('/rooms/{room}/intention', [PresenceController::class, 'updateIntention']);
+
+        /*
+        |----------------------------------------------------------------------
+        | Chat (Milestone 4, PRD 4.6)
+        |----------------------------------------------------------------------
+        */
+        Route::get('/rooms/{room}/messages', [MessageController::class, 'index']);
+        Route::post('/rooms/{room}/messages', [MessageController::class, 'store'])
+            ->middleware('throttle:chat-send');
+        Route::delete('/rooms/{room}/messages/{messageId}', [MessageController::class, 'destroy'])
+            ->whereNumber('messageId');
+
+        /*
+        |----------------------------------------------------------------------
+        | Moderation (Milestone 4, PRD 4.6/4.12)
+        |----------------------------------------------------------------------
+        */
+        Route::post('/rooms/{room}/members/{user}/kick', [ModerationController::class, 'kick']);
+        Route::post('/rooms/{room}/members/{user}/ban', [ModerationController::class, 'ban']);
+        Route::post('/rooms/{room}/members/{user}/mute', [ModerationController::class, 'mute']);
+        Route::post('/reports', [ReportController::class, 'store']);
+        Route::get('/admin/reports', [ReportController::class, 'index']);
+        Route::patch('/admin/reports/{report}', [ReportController::class, 'update']);
     });
 
     // Heartbeats sit outside the api-user bucket (PRD 6: "heartbeats

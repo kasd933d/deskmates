@@ -108,6 +108,19 @@ class Room extends Model
         return $this->hasMany(RoomMember::class);
     }
 
+    public function bans(): HasMany
+    {
+        return $this->hasMany(RoomBan::class);
+    }
+
+    /**
+     * PRD 4.12: bans gate join, heartbeat self-heal and channel auth.
+     */
+    public function isBanned(int $userId): bool
+    {
+        return $this->bans()->where('user_id', $userId)->exists();
+    }
+
     public function isAlwaysOn(): bool
     {
         return $this->type === self::TYPE_ALWAYS_ON;

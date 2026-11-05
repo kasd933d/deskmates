@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\RoomSettingsUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreRoomRequest;
 use App\Http\Resources\RoomResource;
@@ -57,6 +58,10 @@ class RoomController extends Controller
             $room = Room::create([
                 ...$data,
                 'max_members' => $data['max_members'] ?? Room::MAX_MEMBERS[$data['type']],
+                // PRD 4.6: silent focus defaults ON for always-on rooms (the
+                // seeder sets it) and off for host-created rooms — there the
+                // host enables it.
+                'silent_focus' => $data['silent_focus'] ?? false,
                 'host_id' => $request->user()->id,
                 'last_active_at' => now(),
             ]);
@@ -124,6 +129,11 @@ class RoomController extends Controller
 
         $room->update($data);
 
+        // M4: settings edits broadcast so every client (and the host's own
+        // toggle UI) applies them without a refetch — same event host
+        // transfer already uses.
+        event(RoomSettingsUpdated::fromRoom($room->fresh()));
+
         return response()->json([
             'room' => (new RoomResource($room->fresh()->load('host')))->toArray($request),
         ]);
@@ -141,6 +151,12 @@ class RoomController extends Controller
     public function join(Request $request, Room $room, PresenceService $presence): JsonResponse
     {
         $this->authorize('join', $room);
+
+        // PRD 4.12: a ban outlives membership — checked here (the rejoin
+        // path), in heartbeat self-heal and in channel auth.
+        if ($room->isBanned((int) $request->user()->id)) {
+            return response()->json(['message' => 'You are banned from this room.'], 403);
+        }
 
         if ($room->isPrivate()) {
             $request->validate(['invite_code' => ['required', 'string', Rule::in([$room->invite_code])]]);

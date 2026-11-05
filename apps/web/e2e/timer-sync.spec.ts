@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { RUN, USERS, apiPost, loginContext, registerUser } from "./helpers";
+import { RUN, USERS, apiPost, dismissRules, loginContext, registerUser } from "./helpers";
 
 /**
  * Milestone 2 acceptance (PRD 14): "the Playwright two-browser sync test
@@ -75,6 +75,10 @@ test.describe("synced timer (Milestone 2)", () => {
 
       await expect(hostPage.getByTestId("timer-phase")).toHaveText("Waiting to start");
       await expect(matePage.getByTestId("timer-phase")).toHaveText("Waiting to start");
+
+      // The rules prompt (M4) overlays the room on a first join — dismiss
+      // before touching any host control.
+      await dismissRules(hostPage);
 
       // Only the host gets controls.
       await expect(matePage.getByRole("button", { name: "Start focus" })).toHaveCount(0);

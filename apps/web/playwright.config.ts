@@ -25,6 +25,9 @@ export default defineConfig({
   use: {
     baseURL: WEB_URL,
     trace: "retain-on-failure",
+    // PRD 4.7 renders reaction floats only when motion is allowed — pin
+    // the preference so the animation-based assertions are deterministic.
+    reducedMotion: "no-preference",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

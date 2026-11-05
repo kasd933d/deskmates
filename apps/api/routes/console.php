@@ -13,3 +13,5 @@ Schedule::command('presence:reap-stale')->everyThirtySeconds()->withoutOverlappi
 Schedule::command('rooms:broadcast-always-on')->everyMinute()->withoutOverlapping();
 Schedule::command('rooms:stop-idle-timers')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('rooms:archive-empty')->everyFiveMinutes()->withoutOverlapping();
+// PRD 7.3: nightly chat prune (last 200 messages per room, PRD 4.6).
+Schedule::command('messages:prune')->daily()->withoutOverlapping();

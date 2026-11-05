@@ -88,6 +88,16 @@ Every member of a room is a subscriber of a presence channel (`presence-room.{id
 
 The acceptance suite is `apps/web/e2e/presence.spec.ts` (two browsers): a member appears live with their intention, closing a tab removes the member within 60 s (socket drop → live card removal, reaper → row removal, host transfer → crown moves), and opening a second room kicks the first (one-room rule).
 
+## Chat, reactions & moderation (Milestone 4)
+
+Chat is REST-backed and broadcast live: `POST /rooms/{slug}/messages` persists the message and broadcasts `MessageSent` on the room's presence channel, so every open client renders the bubble with no reload (the POST response and the broadcast dedupe by id); `DELETE` soft-deletes and broadcasts `MessageDeleted`. The server keeps the last 200 messages per room (nightly `messages:prune`), masks profanity, blocks links for accounts under 24 hours old, and rate-limits senders at 1 per 2 s / 20 per minute.
+
+Reactions are pure client events — `channel.whisper("reaction", {emoji})` travels over the same presence channel with no server hop, floats up on every screen (`motion-safe:` only; reduced-motion users get per-emoji counters instead), and the sender renders its own float locally because Reverb never echoes a client event back to its origin. Outbound clicks are gated at 5/s and incoming bursts above 10/s are dropped.
+
+Moderation (host or admin): mute flips a live `MemberMuted` verdict (composer disabled with the reason), kick/ban remove membership and tell the target why over their private `user.{id}` channel — a kicked member may rejoin, a banned one gets 403 at every gate. The host's **Silent focus** toggle broadcasts `RoomSettingsUpdated` and locks chat (reactions stay open) while the room is in a focus phase. Anyone can report a member (3–500 chars) from the room; reports land in the admin queue at `/admin/reports` (role-gated), where admins mark them reviewed or dismiss them. First join of any room shows the community-rules prompt once per browser.
+
+The acceptance suite is `apps/web/e2e/chat-moderation.spec.ts` (two browsers): live chat both ways plus the link-block verdict, reaction whispers in both directions, mute/unmute verdicts, kick → rejoin → ban → 403, and the report dialog plus the admin-only gate. Feature tests cover the queue's review flow, profanity masking, rate limits and ban checks (`ChatTest`, `ModerationTest`).
+
 ## Milestones
 
 | Milestone | Status |
@@ -96,7 +106,7 @@ The acceptance suite is `apps/web/e2e/presence.spec.ts` (two browsers): a member
 | 1 — Auth, profile, lobby | ✅ |
 | 2 — Timer engine | ✅ |
 | 3 — Presence and membership | ✅ |
-| 4 — Chat, reactions, moderation | ⬜ |
+| 4 — Chat, reactions, moderation | ✅ |
 | 5 — Focus credit and stats | ⬜ |
 | 6 — Notifications, schedule, ambient sound | ⬜ |
 | 7 — Polish and launch | ⬜ |
@@ -105,5 +115,5 @@ The acceptance suite is `apps/web/e2e/presence.spec.ts` (two browsers): a member
 
 - **API:** `cd apps/api && vendor/bin/phpunit`
 - **Web:** `cd apps/web && npm run lint && npx tsc --noEmit`
-- **E2E (timer sync + presence):** start the local stack (API on :8000, Reverb on :8080, web on :3000, plus `php artisan schedule:work` so the presence reaper runs), optionally `cd apps/api && php artisan cache:clear` to reset auth rate limits, then `cd apps/web && npm run test:e2e`
+- **E2E (timer sync + presence + chat/moderation):** start the local stack (API on :8000, Reverb on :8080, web on :3000, plus `php artisan schedule:work` so the presence reaper runs), optionally `cd apps/api && php artisan cache:clear` to reset auth rate limits, then `cd apps/web && npm run test:e2e`
 - **CI:** every push runs lint, Pint, PHPUnit, type check and a production build (`.github/workflows/ci.yml`).
