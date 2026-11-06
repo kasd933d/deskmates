@@ -64,6 +64,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # LayoutProps/PageProps are globals generated into .next/types;
+      # typegen produces them without a full build so tsc can run first.
+      - name: Generate route types
+        run: npx next typegen
+
       - name: Type check
         run: npx tsc --noEmit
 

@@ -18,6 +18,9 @@
         </include>
     </source>
     <php>
+        <!-- Fixed test key: the suite must not depend on a developer's
+             local .env (CI checks out a clean tree with no .env at all). -->
+        <env name="APP_KEY" value="base64:Ev6K4z/IryWTssakYZ6mVWddfI8ArTX6790c9zglSmk="/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
