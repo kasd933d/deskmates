@@ -23,6 +23,7 @@ import { Timer } from "@/components/room/Timer";
 import type {
   ChatMessage,
   FloatingReaction,
+  FocusCreditedEvent,
   IntentionUpdatedEvent,
   MemberKickedEvent,
   MemberRemovedEvent,
@@ -39,6 +40,7 @@ import type {
   RoomSettingsUpdatedEvent,
   RoomStateResponse,
   RoomType,
+  SessionOutcome,
   TimerAction,
   TimerActionResponse,
   TimerState,
@@ -84,6 +86,10 @@ export function RoomView() {
   const [acting, setActing] = useState(false);
   const [members, setMembers] = useState<RoomMemberCard[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  // PRD 5 session-end flow: "+X min focused" toast plus the break-start
+  // check-in prompt ("Did you finish?"), both driven by FocusCredited.
+  const [checkin, setCheckin] = useState<{ sessionId: number; minutes: number } | null>(null);
+  const [checkinSaving, setCheckinSaving] = useState(false);
   // Monotonic per room visit: once membership is held we keep heartbeating
   // so the server can self-heal a reaped membership (PRD 4.4) instead of the
   // client guessing from a stale grid.
@@ -483,11 +489,40 @@ export function RoomView() {
 
     channel.listen("MemberKicked", onKicked);
 
+    // PRD 5: the credit job's toast + check-in prompt arrive on the same
+    // private channel. Scoped to this room so a credit earned elsewhere
+    // (another tab) never pops up here.
+    const onFocus = (payload: FocusCreditedEvent) => {
+      if (payload.room_id !== roomId) return;
+      setCheckin({ sessionId: payload.session_id, minutes: payload.minutes });
+    };
+    channel.listen("FocusCredited", onFocus);
+
     return () => {
       channel.stopListening("MemberKicked", onKicked);
+      channel.stopListening("FocusCredited", onFocus);
       echo.leave(`user.${userId}`);
     };
   }, [userId, roomId]);
+
+  // PRD 4.5 check-in: store the answer on the credited session (P1 stats).
+  async function answerCheckin(outcome: SessionOutcome) {
+    if (!checkin) return;
+    setCheckinSaving(true);
+    try {
+      await api(`/api/v1/me/sessions/${checkin.sessionId}/outcome`, {
+        method: "PATCH",
+        body: { outcome },
+        csrf: true,
+      });
+      setCheckin(null);
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Couldn't save your check-in answer.");
+      setCheckin(null);
+    } finally {
+      setCheckinSaving(false);
+    }
+  }
 
   async function handleJoin() {
     if (!room) return;
@@ -836,6 +871,47 @@ export function RoomView() {
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
           {notice}
         </p>
+      )}
+
+      {/* PRD 5: credit toast + break-start check-in prompt ("Did you finish?"). */}
+      {checkin && (
+        <div
+          role="status"
+          aria-label="Focus credited"
+          className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+              +{checkin.minutes} min focused
+            </p>
+            <button
+              onClick={() => setCheckin(null)}
+              aria-label="Dismiss"
+              className="text-sm text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-200"
+            >
+              ✕
+            </button>
+          </div>
+          <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">Did you finish?</p>
+          <div className="mt-3 flex gap-2">
+            {(
+              [
+                ["done", "Yes"],
+                ["partly", "Partly"],
+                ["no", "No"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => answerCheckin(value)}
+                disabled={checkinSaving}
+                className="rounded-lg bg-zinc-900 px-4 py-1.5 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {room.type === "private" && !isHost && !isMember && (

@@ -3,8 +3,12 @@
 namespace App\Services;
 
 use App\Events\RoomPhaseChanged;
+use App\Jobs\CreditFocusForPhase;
 use App\Models\Room;
+use App\Models\RoomPhase;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
  * The single source of truth for room timer state.
@@ -155,8 +159,123 @@ class RoomClockService
 
             event(new RoomPhaseChanged($locked->id, $locked->slug, $state, (int) now()->getTimestampMs()));
 
+            // After the broadcast so the phase flip reaches clients before any
+            // "+X min focused" credit that this transition may trigger.
+            $this->syncPhaseHistory($locked);
+
             return $state;
         });
+    }
+
+    /**
+     * Keep `room_phases` in step with the stored timer (PRD 4.8/8).
+     *
+     * - closes rows whose window ended early (host skip/pause/reset)
+     * - opens the row for the running phase (always-on windows are created
+     *   lazily by heartbeats and flip detection instead)
+     * - dispatches CreditFocusForPhase for every uncredited window whose end
+     *   has passed — PRD 7.3's "on demand" credit job. The phase row is the
+     *   unit of work, so an extra dispatch is harmless: the job claims the
+     *   row atomically.
+     *
+     * Runs inside transition()'s transaction: the history writes commit with
+     * the phase change itself, and with a sync/transactional queue the credit
+     * job reads the same connection's view.
+     */
+    public function syncPhaseHistory(Room $room): void
+    {
+        if ($room->isAlwaysOn()) {
+            return;
+        }
+
+        $now = now();
+
+        // Early end: the window's recorded end is still in the future, so the
+        // phase did not run to completion (skip/pause/reset). Natural ends
+        // keep their exact boundary and are picked up by the query below.
+        RoomPhase::query()
+            ->where('room_id', $room->id)
+            ->whereNull('credited_at')
+            ->where('ends_at', '>', $now)
+            ->get()
+            ->each->update(['ends_at' => $now]);
+
+        if ($room->phase !== self::PHASE_IDLE
+            && $room->phase_started_at !== null
+            && $room->phase_ends_at !== null) {
+            $this->ensurePhaseRecord($room, [
+                'type' => $room->phase,
+                'started_at' => $room->phase_started_at->format('Y-m-d H:i:s'),
+                'ends_at' => $room->phase_ends_at->format('Y-m-d H:i:s'),
+                'cycle_index' => (int) $room->cycle_index,
+            ]);
+        }
+
+        RoomPhase::query()
+            ->where('room_id', $room->id)
+            ->whereNull('credited_at')
+            ->where('ends_at', '<=', $now)
+            ->pluck('id')
+            ->each(fn ($id) => CreditFocusForPhase::dispatch((int) $id));
+    }
+
+    /**
+     * Find or create the history row for one phase window. Idempotent under
+     * the (room_id, started_at, type) unique key: heartbeats, transitions and
+     * always-on flip detection all race to create the same window.
+     *
+     * @param  array{type: string, started_at: string, ends_at: string, cycle_index: int}  $window
+     */
+    public function ensurePhaseRecord(Room $room, array $window): RoomPhase
+    {
+        $existing = $this->findPhaseRecord($room, $window);
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        try {
+            return RoomPhase::create([
+                'room_id' => $room->id,
+                'type' => $window['type'],
+                'started_at' => $window['started_at'],
+                'ends_at' => $window['ends_at'],
+                'cycle_index' => $window['cycle_index'],
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            return $this->findPhaseRecord($room, $window)
+                ?? throw new RuntimeException('room_phases row disappeared during insert race');
+        }
+    }
+
+    /**
+     * Normalize alwaysOnPhase() output into the ensurePhaseRecord() window
+     * shape (absolute ms → naive UTC datetimes, same storage format
+     * applyPhase() writes for user rooms).
+     *
+     * @param  array{phase: string, phase_started_at_ms: int, phase_ends_at_ms: int, cycle_index: int}  $state
+     * @return array{type: string, started_at: string, ends_at: string, cycle_index: int}
+     */
+    public static function windowFromState(array $state): array
+    {
+        return [
+            'type' => $state['phase'],
+            'started_at' => date('Y-m-d H:i:s', intdiv($state['phase_started_at_ms'], 1000)),
+            'ends_at' => date('Y-m-d H:i:s', intdiv($state['phase_ends_at_ms'], 1000)),
+            'cycle_index' => (int) $state['cycle_index'],
+        ];
+    }
+
+    /**
+     * @param  array{type: string, started_at: string, ends_at: string, cycle_index: int}  $window
+     */
+    private function findPhaseRecord(Room $room, array $window): ?RoomPhase
+    {
+        return RoomPhase::query()
+            ->where('room_id', $room->id)
+            ->where('type', $window['type'])
+            ->where('started_at', $window['started_at'])
+            ->first();
     }
 
     /**

@@ -64,6 +64,18 @@ class User extends Authenticatable
         return $this->role === 'admin';
     }
 
+    /**
+     * The user's IANA timezone, hardened against the free-text profile
+     * field: stats, daily caps and streaks all bucket time with this, and a
+     * garbage value must not throw (PRD 4.8 runs "in the user's timezone").
+     */
+    public function timezoneName(): string
+    {
+        $timezone = (string) $this->timezone;
+
+        return in_array($timezone, timezone_identifiers_list(), true) ? $timezone : 'UTC';
+    }
+
     public function membership(): HasOne
     {
         return $this->hasOne(RoomMember::class);
@@ -72,5 +84,15 @@ class User extends Authenticatable
     public function hostedRooms(): HasMany
     {
         return $this->hasMany(Room::class, 'host_id');
+    }
+
+    public function focusSessions(): HasMany
+    {
+        return $this->hasMany(FocusSession::class);
+    }
+
+    public function dailyFocus(): HasMany
+    {
+        return $this->hasMany(UserDailyFocus::class);
     }
 }

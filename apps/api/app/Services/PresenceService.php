@@ -19,7 +19,10 @@ use Illuminate\Support\Facades\DB;
  */
 class PresenceService
 {
-    public function __construct(private RoomClockService $clock) {}
+    public function __construct(
+        private RoomClockService $clock,
+        private FocusCreditService $focus,
+    ) {}
 
     /**
      * PRD 4.4: the client heartbeats every 20 s with its visibility; a member
@@ -38,8 +41,13 @@ class PresenceService
         }
 
         // A stale phase would misreport focus vs break right after expiry —
-        // same lazy fallback the room state endpoint uses.
-        $this->clock->advanceIfExpired($room);
+        // same lazy fallback the room state endpoint uses. Refresh after a
+        // transition so the attendance accrual below sees the *new* phase: a
+        // beat landing after the boundary must not extend the ended window
+        // (PRD 4.8 accrues only "during a focus phase").
+        if ($this->clock->advanceIfExpired($room)) {
+            $room->refresh();
+        }
 
         $rejoined = false;
 
@@ -58,6 +66,11 @@ class PresenceService
                     return null; // restoreMembership threw already
                 }
             }
+
+            // PRD 4.8 accrual: elapsed time since the previous beat. Captured
+            // before the update below overwrites last_seen_at; a re-joined
+            // member passes null (their fresh row starts the clock at "now").
+            $previousSeenAt = $rejoined ? null : $member->last_seen_at;
 
             // The stored status is what the room was last told; the away flip
             // fires only when that reported state changes. Deriving "was" from
@@ -85,6 +98,10 @@ class PresenceService
             // Keeps StopIdleTimers honest: activity is proven by heartbeats,
             // not just by join/leave rows.
             $room->update(['last_active_at' => now()]);
+
+            // PRD 4.8: heartbeats during a focus phase accrue attendance
+            // (capped at 45 s per beat); breaks accrue nothing.
+            $this->focus->recordAttendance($room, $user, $phase, $previousSeenAt);
 
             return [
                 'status' => $status,

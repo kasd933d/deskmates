@@ -256,3 +256,78 @@ export type FloatingReaction = {
   /** The reacting member (server-injected whisper metadata), if still present. */
   user_id: number | null;
 };
+
+/* ----------------------------------------------------------------------
+ * Milestone 5 — focus credit and stats (PRD 4.8)
+ * ---------------------------------------------------------------------- */
+
+/** The break-start check-in answer ("Did you finish?", PRD 4.5). */
+export type SessionOutcome = "done" | "partly" | "no";
+
+/** GET /me/stats — personal totals, streaks and check-in completion. */
+export type StatsPayload = {
+  today_minutes: number;
+  week_minutes: number;
+  all_time_minutes: number;
+  current_streak: number;
+  longest_streak: number;
+  /** A day counts toward the streak at this many credited minutes. */
+  streak_threshold_minutes: number;
+  daily_cap_minutes: number;
+  sessions_total: number;
+  avg_session_minutes: number;
+  best_day: { date: string; minutes: number } | null;
+  favorite_hours: { hour: number; minutes: number }[];
+  checkins: {
+    answered: number;
+    done: number;
+    completion_rate: number | null;
+  };
+  server_now_ms: number;
+};
+
+/** One day of the 12-week heatmap (local_date → credited minutes). */
+export type HeatmapDay = {
+  date: string;
+  minutes: number;
+};
+
+/** GET /me/heatmap — 12 whole week columns, current partial week last. */
+export type HeatmapPayload = {
+  start_date: string;
+  end_date: string;
+  weeks: number;
+  days: HeatmapDay[];
+  max_minutes: number;
+  server_now_ms: number;
+};
+
+/** One row of the weekly leaderboard; opted-out users are anonymized. */
+export type LeaderboardEntry = {
+  rank: number;
+  is_me: boolean;
+  anonymous: boolean;
+  user_id: number | null;
+  name: string;
+  avatar_emoji: string | null;
+  avatar_color: string | null;
+  minutes: number;
+};
+
+/** GET /leaderboard?scope=weekly&room= — public, guests included. */
+export type LeaderboardResponse = {
+  scope: "weekly";
+  week_start: string;
+  room_id: number | null;
+  entries: LeaderboardEntry[];
+  server_now_ms: number;
+};
+
+/** Payload of the FocusCredited broadcast (private-user channel). */
+export type FocusCreditedEvent = {
+  session_id: number;
+  minutes: number;
+  room_id: number;
+  local_date: string;
+  server_now_ms: number;
+};

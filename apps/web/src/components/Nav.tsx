@@ -25,11 +25,23 @@ export function Nav() {
           <Link href="/rooms" className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
             Lobby
           </Link>
+          <Link
+            href="/leaderboard"
+            className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+          >
+            Leaderboard
+          </Link>
 
           {loading ? (
             <span className="text-zinc-400">…</span>
           ) : user ? (
             <>
+              <Link
+                href="/me"
+                className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                Stats
+              </Link>
               <Link
                 href="/rooms/new"
                 className="rounded-lg bg-zinc-900 px-3 py-1.5 font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"

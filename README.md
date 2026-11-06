@@ -98,6 +98,12 @@ Moderation (host or admin): mute flips a live `MemberMuted` verdict (composer di
 
 The acceptance suite is `apps/web/e2e/chat-moderation.spec.ts` (two browsers): live chat both ways plus the link-block verdict, reaction whispers in both directions, mute/unmute verdicts, kick → rejoin → ban → 403, and the report dialog plus the admin-only gate. Feature tests cover the queue's review flow, profanity masking, rate limits and ban checks (`ChatTest`, `ModerationTest`).
 
+## Focus credit & stats (Milestone 5)
+
+Heartbeats prove focus: every 20 s beat during a focus phase adds elapsed time (capped at 45 s) to `phase_attendance`. When a phase ends — natural expiry, a host skip/pause, an idle stop, or an always-on flip — `CreditFocusForPhase` converts attendance into `focus_sessions` rows: `floor(seconds / 60)`, only at 5+ minutes, never for breaks, and never past a 12-hour daily cap computed in the member's own timezone. Each credit lands with a `user_daily_focus` rollup and a `FocusCredited` broadcast on the member's private channel, which renders the **"+X min focused"** toast and the break-start check-in prompt (**Did you finish?** → Yes / Partly / No, stored on the session for personal stats). Nightly `focus:rollup` rebuilds daily rows and repairs stalled credits; `focus:prune-attendance` drops attendance 30 days after its phase was credited.
+
+`/me` shows today / this week / all-time minutes, current and longest streaks (a day counts at 25+ credited minutes; a run stays alive until the day after it ends), a 12-week heatmap, best day, average session length, favorite hours and check-in completion. `/leaderboard` lists the weekly top 50 globally or per room; opting out in settings keeps your minutes in the ranking but shows you as "Anonymous focuser". The whole pipeline is pinned by `tests/Feature/FocusCreditTest.php` (20 tests: accrual caps, the 5-minute floor, the 12-hour cap, timezone buckets, streaks, always-on flips, check-ins, leaderboard scoping and nightly repair).
+
 ## Milestones
 
 | Milestone | Status |
@@ -107,7 +113,7 @@ The acceptance suite is `apps/web/e2e/chat-moderation.spec.ts` (two browsers): l
 | 2 — Timer engine | ✅ |
 | 3 — Presence and membership | ✅ |
 | 4 — Chat, reactions, moderation | ✅ |
-| 5 — Focus credit and stats | ⬜ |
+| 5 — Focus credit and stats | ✅ |
 | 6 — Notifications, schedule, ambient sound | ⬜ |
 | 7 — Polish and launch | ⬜ |
 
@@ -115,5 +121,5 @@ The acceptance suite is `apps/web/e2e/chat-moderation.spec.ts` (two browsers): l
 
 - **API:** `cd apps/api && vendor/bin/phpunit`
 - **Web:** `cd apps/web && npm run lint && npx tsc --noEmit`
-- **E2E (timer sync + presence + chat/moderation):** start the local stack (API on :8000, Reverb on :8080, web on :3000, plus `php artisan schedule:work` so the presence reaper runs), optionally `cd apps/api && php artisan cache:clear` to reset auth rate limits, then `cd apps/web && npm run test:e2e`
+- **E2E (timer sync + presence + chat/moderation + stats):** start the local stack (API on :8000, Reverb on :8080, web on :3000, plus `php artisan schedule:work` so the presence reaper runs), optionally `cd apps/api && php artisan cache:clear` to reset auth rate limits, then `cd apps/web && npm run test:e2e`
 - **CI:** every push runs lint, Pint, PHPUnit, type check and a production build (`.github/workflows/ci.yml`).

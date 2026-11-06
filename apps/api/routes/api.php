@@ -2,12 +2,14 @@
 
 use App\Events\PingReceived;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\LeaderboardController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\ModerationController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoomController;
+use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\TimerController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -62,6 +64,16 @@ Route::prefix('v1')->group(function () {
 
         /*
         |----------------------------------------------------------------------
+        | Focus credit and stats (Milestone 5, PRD 4.8)
+        |----------------------------------------------------------------------
+        */
+        Route::get('/me/stats', [StatsController::class, 'stats']);
+        Route::get('/me/heatmap', [StatsController::class, 'heatmap']);
+        Route::patch('/me/sessions/{session}/outcome', [StatsController::class, 'updateOutcome'])
+            ->whereNumber('session');
+
+        /*
+        |----------------------------------------------------------------------
         | Rooms (P0)
         |----------------------------------------------------------------------
         */
@@ -110,6 +122,15 @@ Route::prefix('v1')->group(function () {
     // exempt") and carry their own 1-per-15 s limiter instead.
     Route::post('/rooms/{room}/heartbeat', [PresenceController::class, 'heartbeat'])
         ->middleware(['auth', 'throttle:heartbeat']);
+
+    /*
+    |----------------------------------------------------------------------
+    | Leaderboard (Milestone 5, PRD 4.8) — a public page: auth is optional,
+    | guests read the weekly top and the api-user limiter signs on IP.
+    |----------------------------------------------------------------------
+    */
+    Route::get('/leaderboard', [LeaderboardController::class, 'index'])
+        ->middleware('throttle:api-user');
 
     /*
     |----------------------------------------------------------------------

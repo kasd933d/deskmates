@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Events\RoomPhaseChanged;
+use App\Jobs\CreditFocusForPhase;
 use App\Models\Room;
 use App\Services\RoomClockService;
 use Illuminate\Console\Command;
@@ -37,6 +38,11 @@ class BroadcastAlwaysOnPhases extends Command
                     return;
                 }
 
+                // The window that just ended, computed from one millisecond
+                // before the new one starts (contiguous for a steady
+                // scheduler; whatever the clock says for a delayed one).
+                $ended = $clock->alwaysOnPhase($room, $state['phase_started_at_ms'] - 1);
+
                 $room->forceFill([
                     'phase' => $state['phase'],
                     'phase_started_at' => date('Y-m-d H:i:s', intdiv($state['phase_started_at_ms'], 1000)),
@@ -46,6 +52,16 @@ class BroadcastAlwaysOnPhases extends Command
 
                 event(new RoomPhaseChanged($room->id, $room->slug, $state, $nowMs));
                 $changed++;
+
+                // PRD 7.3 "on demand: CreditFocusForPhase" — for always-on
+                // rooms the flip *is* the phase end. Skip when the "ended"
+                // window is really the still-running first one (initial sync
+                // computes a synthetic predecessor equal to the current
+                // window) — credited_at must never close a live phase.
+                if ($ended['phase_ends_at_ms'] <= $nowMs) {
+                    $record = $clock->ensurePhaseRecord($room, RoomClockService::windowFromState($ended));
+                    CreditFocusForPhase::dispatch((int) $record->id);
+                }
             });
 
         $this->info("Broadcast {$changed} always-on phase change(s).");
