@@ -19,3 +19,7 @@ Schedule::command('messages:prune')->daily()->withoutOverlapping();
 // credits) and attendance prune (rows only feed the credit job, PRD 4.8).
 Schedule::command('focus:rollup')->daily()->withoutOverlapping();
 Schedule::command('focus:prune-attendance')->daily()->withoutOverlapping();
+// PRD 7.3: auto-start booked sessions and push the 10-minute reminder
+// (Milestone 6, PRD 4.10/4.11).
+Schedule::command('sessions:start')->everyMinute()->withoutOverlapping();
+Schedule::command('sessions:remind')->everyMinute()->withoutOverlapping();

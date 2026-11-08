@@ -32,6 +32,11 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <!-- Fixed VAPID key pair (PRD 15): push tests must not depend on a
+             developer's local .env, and signing is exercised for real. -->
+        <env name="VAPID_PUBLIC_KEY" value="BJCbya-7PKEk_FRXXOg9BwJ3wzT_SsEMHsGX18K83BqQiM0EpTiq5MYNlfRMXq-9syMUuBaN4AZu4KErgZLupwk"/>
+        <env name="VAPID_PRIVATE_KEY" value="enbPf9h_V-sTxSjSq9b4g7al7NoMdY2W7L2lB1n3BzU"/>
+        <env name="VAPID_SUBJECT" value="mailto:tests@deskmates.local"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

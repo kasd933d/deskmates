@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    // PRD 15: Web Push (VAPID) — the key pair identifying this app to push
+    // services, plus the contact subject the RFC requires in VAPID claims.
+    'vapid' => [
+        'public' => env('VAPID_PUBLIC_KEY'),
+        'private' => env('VAPID_PRIVATE_KEY'),
+        'subject' => env('VAPID_SUBJECT', 'mailto:hello@example.com'),
+    ],
+
 ];

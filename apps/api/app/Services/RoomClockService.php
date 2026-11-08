@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Events\RoomPhaseChanged;
 use App\Jobs\CreditFocusForPhase;
+use App\Jobs\SendPhasePush;
 use App\Models\Room;
 use App\Models\RoomPhase;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -158,6 +159,19 @@ class RoomClockService
             $state = $this->userRoomState($locked);
 
             event(new RoomPhaseChanged($locked->id, $locked->slug, $state, (int) now()->getTimestampMs()));
+
+            // PRD 4.10: Web Push on a phase change, for members who opted
+            // in. Only a real flip into a running phase counts — pause and
+            // reset land on idle and stay silent. ShouldQueueAfterCommit:
+            // the fan-out must see the committed phase.
+            if ($locked->wasChanged('phase_version') && $locked->phase !== self::PHASE_IDLE) {
+                SendPhasePush::dispatch(
+                    (int) $locked->id,
+                    $locked->slug,
+                    $locked->name,
+                    $locked->phase,
+                );
+            }
 
             // After the broadcast so the phase flip reaches clients before any
             // "+X min focused" credit that this transition may trigger.

@@ -37,6 +37,12 @@ export function Nav() {
           ) : user ? (
             <>
               <Link
+                href="/schedule"
+                className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                Schedule
+              </Link>
+              <Link
                 href="/me"
                 className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
               >

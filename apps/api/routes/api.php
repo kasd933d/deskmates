@@ -7,8 +7,10 @@ use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\ModerationController;
 use App\Http\Controllers\Api\PresenceController;
+use App\Http\Controllers\Api\PushController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoomController;
+use App\Http\Controllers\Api\ScheduleController;
 use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\TimerController;
 use Illuminate\Http\Request;
@@ -116,6 +118,23 @@ Route::prefix('v1')->group(function () {
         Route::post('/reports', [ReportController::class, 'store']);
         Route::get('/admin/reports', [ReportController::class, 'index']);
         Route::patch('/admin/reports/{report}', [ReportController::class, 'update']);
+
+        /*
+        |----------------------------------------------------------------------
+        | Schedule and push (Milestone 6, PRD 4.10/4.11)
+        |----------------------------------------------------------------------
+        */
+        Route::get('/sessions', [ScheduleController::class, 'index']);
+        Route::post('/sessions', [ScheduleController::class, 'store']);
+        Route::delete('/sessions/{session}', [ScheduleController::class, 'destroy'])
+            ->whereNumber('session');
+        Route::post('/sessions/{session}/rsvp', [ScheduleController::class, 'rsvp'])
+            ->whereNumber('session');
+        Route::delete('/sessions/{session}/rsvp', [ScheduleController::class, 'cancelRsvp'])
+            ->whereNumber('session');
+
+        Route::post('/push/subscribe', [PushController::class, 'store']);
+        Route::delete('/push/subscribe', [PushController::class, 'destroy']);
     });
 
     // Heartbeats sit outside the api-user bucket (PRD 6: "heartbeats

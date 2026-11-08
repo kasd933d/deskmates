@@ -62,6 +62,7 @@ php artisan key:generate
 php artisan migrate
 php artisan serve          # http://localhost:8000
 php artisan reverb:start   # in a second terminal — ws://localhost:8080
+php artisan schedule:work  # in a third terminal — reaper, auto-start, reminders
 php artisan queue:work --queue=default,phase,push   # optional at this stage
 
 # Web
@@ -104,6 +105,16 @@ Heartbeats prove focus: every 20 s beat during a focus phase adds elapsed time (
 
 `/me` shows today / this week / all-time minutes, current and longest streaks (a day counts at 25+ credited minutes; a run stays alive until the day after it ends), a 12-week heatmap, best day, average session length, favorite hours and check-in completion. `/leaderboard` lists the weekly top 50 globally or per room; opting out in settings keeps your minutes in the ranking but shows you as "Anonymous focuser". The whole pipeline is pinned by `tests/Feature/FocusCreditTest.php` (20 tests: accrual caps, the 5-minute floor, the 12-hour cap, timezone buckets, streaks, always-on flips, check-ins, leaderboard scoping and nightly repair).
 
+## Notifications, schedule & ambient sound (Milestone 6)
+
+**Scheduled sessions (PRD 4.11).** `/schedule` lists every upcoming booking the viewer can reach — public rooms plus rooms they belong to or host — formatted in their profile timezone; hosts book through the form (room, title, start time, four-key timer config) and RSVP is a one-click idempotent toggle. Two every-minute scheduler entries run the clockwork: `sessions:remind` fans out a Web Push reminder to RSVP'd members exactly once when the start time falls inside the next 10 minutes (`reminded_at` marks the session even when nobody had a subscription, so a delivery failure never re-fires every minute), and `sessions:start` claims due bookings with a conditional `scheduled → started` status flip (idempotent — a crashed sweep can never double-start), cancels bookings whose room was archived, applies the booking's config to the room (broadcast as `RoomSettingsUpdated`) and starts the timer through `RoomClockService::transition()`.
+
+**Web Push (PRD 4.10).** Subscriptions opt in from Settings → Notifications: the browser's `pushManager.subscribe` (VAPID public key from `NEXT_PUBLIC_VAPID_PUBLIC_KEY`) mirrors endpoint + keys to `POST /push/subscribe`, keyed by endpoint so a re-subscribe moves the row to the current account. Phase changes dispatch `SendPhasePush` to the room's current members with a subscription; `PushService` (minishlink/web-push v11, aes128gcm / rfc8291) encrypts every payload against the subscriber's `p256dh` key and reads each answer — a 404/410 deletes the row on the spot, so the table self-cleans. The service worker (`public/push-sw.js`) drops phase toasts while a DeskMates tab is visible (PRD: push fires "if the tab is in the background" — the in-tab chime covers the visible case) but never drops session reminders.
+
+**Sound (PRD 4.9/4.10).** The room header's 🎧 button switches between four scenes — rain, brown noise, cafe, fireplace — all synthesized live with the Web Audio API (noise buffers through filter chains plus randomized clinks/crackles; no audio files, so there is nothing to license), with the choice and volume slider persisted in localStorage. A soft two-note sine chime cues transitions into focus/break — never idle, only on a visible tab — toggleable in settings next to the push opt-in.
+
+The acceptance suite is `apps/web/e2e/schedule.spec.ts`: book a session through the form, RSVP on/off/on, then wait for `sessions:start` to flip the room into focus with the booked config applied (50/10 over the room's 25/5) and the started booking to leave the upcoming list. `ScheduledSessionTest` (14 tests) and `PushTest` (11 tests) pin list scoping, host-only booking, cancellation rules, auto-start idempotency, the reminder's exactly-once window, subscription lifecycle, phase fan-out and 404/410 cleanup against a fake PSR-18 client — browsers cannot receive real Web Push in the test rig, so delivery is proven server-side.
+
 ## Milestones
 
 | Milestone | Status |
@@ -114,12 +125,12 @@ Heartbeats prove focus: every 20 s beat during a focus phase adds elapsed time (
 | 3 — Presence and membership | ✅ |
 | 4 — Chat, reactions, moderation | ✅ |
 | 5 — Focus credit and stats | ✅ |
-| 6 — Notifications, schedule, ambient sound | ⬜ |
+| 6 — Notifications, schedule, ambient sound | ✅ |
 | 7 — Polish and launch | ⬜ |
 
 ## Testing
 
 - **API:** `cd apps/api && vendor/bin/phpunit`
 - **Web:** `cd apps/web && npm run lint && npx tsc --noEmit`
-- **E2E (timer sync + presence + chat/moderation + stats):** start the local stack (API on :8000, Reverb on :8080, web on :3000, plus `php artisan schedule:work` so the presence reaper runs), optionally `cd apps/api && php artisan cache:clear` to reset auth rate limits, then `cd apps/web && npm run test:e2e`
+- **E2E (timer sync + presence + chat/moderation + stats + schedule):** start the local stack (API on :8000, Reverb on :8080, web on :3000, plus `php artisan schedule:work` so the presence reaper and session auto-start run), optionally `cd apps/api && php artisan cache:clear` to reset auth rate limits, then `cd apps/web && npm run test:e2e` (ports overridable with `E2E_API_URL` / `E2E_WEB_URL`)
 - **CI:** every push runs lint, Pint, PHPUnit, type check and a production build (`.github/workflows/ci.yml`).

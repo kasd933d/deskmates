@@ -331,3 +331,53 @@ export type FocusCreditedEvent = {
   local_date: string;
   server_now_ms: number;
 };
+
+/* ----------------------------------------------------------------------
+ * Milestone 6 — schedule and push (PRD 4.10 / 4.11)
+ * ---------------------------------------------------------------------- */
+
+/** The four timer keys a booking carries (PRD 8); applied on auto-start. */
+export type SessionConfig = {
+  focus_minutes: number;
+  short_break_minutes: number;
+  long_break_minutes: number;
+  long_break_every: number;
+};
+
+export type SessionStatus = "scheduled" | "started" | "cancelled";
+
+/** A scheduled session as the /sessions API payloads it. */
+export type ScheduledSession = {
+  id: number;
+  room_id: number;
+  room: { id: number; slug: string; name: string; type: RoomType; theme: string } | null;
+  host: {
+    id: number;
+    name: string;
+    avatar_emoji: string | null;
+    avatar_color: string | null;
+  } | null;
+  title: string;
+  /** UTC ISO-8601; rendered in the viewer's timezone (PRD 4.11). */
+  starts_at: string;
+  config: SessionConfig;
+  status: SessionStatus;
+  rsvp_count: number;
+  has_rsvp: boolean;
+};
+
+export type ScheduleResponse = {
+  sessions: ScheduledSession[];
+  server_now_ms: number;
+};
+
+export type SessionResponse = {
+  session: ScheduledSession;
+  server_now_ms: number;
+};
+
+/** POST /push/subscribe — the stored subscription's identity. */
+export type PushSubscriptionResponse = {
+  subscription: { id: number; endpoint: string };
+  server_now_ms: number;
+};

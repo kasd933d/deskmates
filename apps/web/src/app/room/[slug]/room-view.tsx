@@ -7,6 +7,7 @@ import { useHeartbeat } from "@/hooks/useHeartbeat";
 import { api, ApiError } from "@/lib/api";
 import { getEcho } from "@/lib/echo";
 import { serverClock } from "@/lib/clock";
+import { playChime } from "@/lib/chime";
 import {
   FLOAT_DURATION_MS,
   INCOMING_LIMIT,
@@ -20,6 +21,7 @@ import { MemberGrid, type ModerationAction } from "@/components/room/MemberGrid"
 import { ReactionBar } from "@/components/room/ReactionBar";
 import { ReportDialog } from "@/components/room/ReportDialog";
 import { Timer } from "@/components/room/Timer";
+import { AmbientPlayer } from "@/components/AmbientPlayer";
 import type {
   ChatMessage,
   FloatingReaction,
@@ -36,6 +38,7 @@ import type {
   ReactionPayload,
   Room,
   RoomMemberCard,
+  RoomPhase,
   RoomPhaseChangedEvent,
   RoomSettingsUpdatedEvent,
   RoomStateResponse,
@@ -80,6 +83,10 @@ export function RoomView() {
   const router = useRouter();
   const [room, setRoom] = useState<Room | null>(null);
   const [timer, setTimer] = useState<TimerState | null>(null);
+  // M6 chime (PRD 4.10): the phase we last rendered, so the broadcast
+  // listener can tell a real transition into focus/break from a repeat or
+  // a landing on idle (pause/reset stay silent).
+  const prevPhaseRef = useRef<RoomPhase | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState("");
   const [joining, setJoining] = useState(false);
@@ -316,6 +323,12 @@ export function RoomView() {
     },
   });
 
+  // Keep the chime's comparison point in step with the rendered phase
+  // (initial load, re-syncs and non-broadcast updates all land here).
+  useEffect(() => {
+    prevPhaseRef.current = timer?.phase ?? null;
+  }, [timer?.phase]);
+
   // Live phase changes: subscribe to the room broadcast channel.
   useEffect(() => {
     if (!room) return;
@@ -324,6 +337,14 @@ export function RoomView() {
     echo
       .channel(`room.${room.id}`)
       .listen("RoomPhaseChanged", (payload: RoomPhaseChangedEvent) => {
+        // PRD 4.10: the soft chime cues focus/break transitions only —
+        // never idle, and only once per actual flip.
+        const previous = prevPhaseRef.current;
+        if (payload.phase !== "idle" && previous !== null && previous !== payload.phase) {
+          playChime();
+        }
+        prevPhaseRef.current = payload.phase;
+
         setTimer({
           phase: payload.phase,
           phase_started_at_ms: payload.phase_started_at_ms,
@@ -727,7 +748,10 @@ export function RoomView() {
             <span>{room.focus_minutes} / {room.short_break_minutes} min cycles</span>
           </div>
         </div>
-        <span className="text-4xl" aria-hidden>⏳</span>
+        <div className="flex items-center gap-2">
+          <AmbientPlayer />
+          <span className="text-4xl" aria-hidden>⏳</span>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-zinc-200 bg-white py-10 dark:border-zinc-800 dark:bg-zinc-900">

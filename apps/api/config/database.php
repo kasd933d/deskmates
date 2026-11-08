@@ -38,8 +38,12 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
+            // Dev runs `php artisan serve` alongside the every-minute
+            // `schedule:work` sweeps against this file — WAL lets them
+            // overlap and busy_timeout makes a blocked writer wait instead
+            // of throwing "database is locked" mid-request.
+            'busy_timeout' => 10000,
+            'journal_mode' => 'WAL',
             'synchronous' => null,
             'transaction_mode' => 'DEFERRED',
         ],

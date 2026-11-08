@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Events\RoomPhaseChanged;
 use App\Jobs\CreditFocusForPhase;
+use App\Jobs\SendPhasePush;
 use App\Models\Room;
 use App\Services\RoomClockService;
 use Illuminate\Console\Command;
@@ -52,6 +53,17 @@ class BroadcastAlwaysOnPhases extends Command
 
                 event(new RoomPhaseChanged($room->id, $room->slug, $state, $nowMs));
                 $changed++;
+
+                // PRD 4.10: Web Push on the flip for always-on rooms too —
+                // same fan-out as user rooms (members who opted in).
+                if ($state['phase'] !== RoomClockService::PHASE_IDLE) {
+                    SendPhasePush::dispatch(
+                        (int) $room->id,
+                        $room->slug,
+                        $room->name,
+                        $state['phase'],
+                    );
+                }
 
                 // PRD 7.3 "on demand: CreditFocusForPhase" — for always-on
                 // rooms the flip *is* the phase end. Skip when the "ended"
